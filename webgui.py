@@ -67,7 +67,7 @@ infer_config = OmegaConf.load(inference_config_path)
 
 ############# model_init started #############
 ## vae init
-vae = AutoencoderKL.from_pretrained(config.pretrained_vae_path).to("cuda", dtype=weight_dtype)
+vae = AutoencoderKL.from_pretrained(config.pretrained_vae_path).to(device, dtype=weight_dtype)
 
 ## reference net init
 reference_unet = UNet2DConditionModel.from_pretrained(
@@ -101,8 +101,8 @@ else:
 denoising_unet.load_state_dict(torch.load(config.denoising_unet_path, map_location="cpu"), strict=False)
 
 ## face locator init
-face_locator = FaceLocator(320, conditioning_channels=1, block_out_channels=(16, 32, 96, 256)).to(dtype=weight_dtype, device="cuda")
-face_locator.load_state_dict(torch.load(config.face_locator_path))
+face_locator = FaceLocator(320, conditioning_channels=1, block_out_channels=(16, 32, 96, 256)).to(dtype=weight_dtype, device=device)
+face_locator.load_state_dict(torch.load(config.face_locator_path, map_location=device))
 
 ## load audio processor params
 audio_processor = load_audio_model(model_path=config.audio_model_path, device=device)
@@ -122,7 +122,7 @@ pipe = Audio2VideoPipeline(
     audio_guider=audio_processor,
     face_locator=face_locator,
     scheduler=scheduler,
-).to("cuda", dtype=weight_dtype)
+).to(device, dtype=weight_dtype)
 
 def select_face(det_bboxes, probs):
     ## max face from faces that the prob is above 0.8
@@ -147,6 +147,8 @@ def process_video(uploaded_img, uploaded_audio, width, height, length, seed, fac
 
     #### face musk prepare
     face_img = cv2.imread(uploaded_img)
+    if face_img is None:
+        raise ValueError(f"Failed to load image from {uploaded_img}")
     face_mask = np.zeros((face_img.shape[0], face_img.shape[1])).astype('uint8')
     det_bboxes, probs = face_detector.detect(face_img)
     select_bbox = select_face(det_bboxes, probs)
@@ -164,13 +166,21 @@ def process_video(uploaded_img, uploaded_audio, width, height, length, seed, fac
         r_pad_crop = int((re - rb) * facecrop_dilation_ratio)
         c_pad_crop = int((ce - cb) * facecrop_dilation_ratio)
         crop_rect = [max(0, cb - c_pad_crop), max(0, rb - r_pad_crop), min(ce + c_pad_crop, face_img.shape[1]), min(re + r_pad_crop, face_img.shape[0])]
-        face_img = crop_and_pad(face_img, crop_rect)
-        face_mask = crop_and_pad(face_mask, crop_rect)
-        face_img = cv2.resize(face_img, (width, height))
-        face_mask = cv2.resize(face_mask, (width, height))
-
+        face_img,_ = crop_and_pad(face_img, crop_rect)
+        face_mask,_ = crop_and_pad(face_mask, crop_rect)
+        # 在进行 resize 之前检查 face_img 是否为空
+        if face_img is not None and face_img.size > 0:
+            face_img = cv2.resize(face_img, (width, height))
+        else:
+            raise ValueError("Face image is empty after cropping.")
+        
+        # 在进行 resize 之前检查 face_mask 是否为空
+        if face_mask is not None and face_mask.size > 0:
+            face_mask = cv2.resize(face_mask, (width, height))
+        else:
+            raise ValueError("Face mask is empty after cropping.")
     ref_image_pil = Image.fromarray(face_img[:, :, [2, 1, 0]])
-    face_mask_tensor = torch.Tensor(face_mask).to(dtype=weight_dtype, device="cuda").unsqueeze(0).unsqueeze(0).unsqueeze(0) / 255.0
+    face_mask_tensor = torch.Tensor(face_mask).to(dtype=weight_dtype, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0) / 255.0
     
     video = pipe(
         ref_image_pil,

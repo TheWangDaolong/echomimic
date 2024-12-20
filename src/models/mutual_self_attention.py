@@ -61,7 +61,7 @@ class ReferenceAttentionControl:
         dtype=torch.float16,
         batch_size=1,
         num_images_per_prompt=1,
-        device=torch.device("cuda"),
+        device=torch.device("cpu"),
         fusion_blocks="midup",
     ):
         MODE = mode
