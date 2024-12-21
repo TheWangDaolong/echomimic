@@ -62,6 +62,7 @@ device = "cuda"
 if not torch.cuda.is_available():
     device = "cpu"
 
+print(f'{device=}')
 inference_config_path = config.inference_config
 infer_config = OmegaConf.load(inference_config_path)
 
@@ -74,7 +75,7 @@ reference_unet = UNet2DConditionModel.from_pretrained(
     config.pretrained_base_model_path,
     subfolder="unet",
 ).to(dtype=weight_dtype, device=device)
-reference_unet.load_state_dict(torch.load(config.reference_unet_path, map_location="cpu"))
+reference_unet.load_state_dict(torch.load(config.reference_unet_path, map_location=device))
 
 ## denoising net init
 if os.path.exists(config.motion_module_path):
@@ -98,7 +99,7 @@ else:
         }
     ).to(dtype=weight_dtype, device=device)
 
-denoising_unet.load_state_dict(torch.load(config.denoising_unet_path, map_location="cpu"), strict=False)
+denoising_unet.load_state_dict(torch.load(config.denoising_unet_path, map_location=device), strict=False)
 
 ## face locator init
 face_locator = FaceLocator(320, conditioning_channels=1, block_out_channels=(16, 32, 96, 256)).to(dtype=weight_dtype, device=device)
